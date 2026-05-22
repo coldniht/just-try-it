@@ -24,7 +24,7 @@ jobs:
         reg add "HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000" /v DriverDesc /t REG_SZ /d "$env:GPU" /f
         reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v EnableHardwareMode /t REG_DWORD /d 1 /f
         iwr https://download.microsoft.com/download/8/4/A/84A35BF1-DAFE-4AE8-82AF-AD2AE20B6B14/directx_Jun2010_redist.exe -OutFile $env:TEMP\dx.exe
-        Start-Process $env:TEMP\dx.exe /quiet /norestart -Wait
+        & "$env:TEMP\dx.exe" /quiet /norestart
     - name: Tailscale
       run: |
         $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
@@ -57,6 +57,6 @@ jobs:
         $batas = (Get-Date).AddMinutes(358)
         while((Get-Date) -lt $batas) {
           echo "MASIH HIDUP - $(Get-Date -f HH:mm:ss)"
-          Start-Sleep 60
+          Start-Sleep 30
         }
         
