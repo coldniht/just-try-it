@@ -1,0 +1,89 @@
+name: RDP-ONLY-GPU
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: pwsh
+jobs:
+  rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    env:
+      RDP_USER: Bullettemporary
+      RDP_PASS: Bullet@12345
+      GPU_NAME: NVIDIA GeForce RTX 3090
+      GPU_VENDOR: NVIDIA
+      GPU_DRIVER_VER: 552.44
+    steps:
+    - name: Setup GPU Environment
+      run: |
+        # Set GPU info di registry biar kedetek aplikasi
+        New-Item -Path "HKLM:\HARDWARE\DEVICEMAP\VIDEO" -Force
+        Set-ItemProperty -Path "HKLM:\HARDWARE\DEVICEMAP\VIDEO" -Name "\Device\Video0" -Value "\Registry\Machine\System\CurrentControlSet\Control\Video\{63791729-9463-4795-A91D-564872798364}\0000" -Type String -Force
+        
+        $videoReg = "HKLM:\SYSTEM\CurrentControlSet\Control\Video\{63791729-9463-4795-A91D-564872798364}\0000"
+        New-Item -Path $videoReg -Force
+        Set-ItemProperty -Path $videoReg -Name "HardwareInformation.ChipType" -Value 0x25040001 -Type DWord -Force
+        Set-ItemProperty -Path $videoReg -Name "HardwareInformation.DACType" -Value 0x00000000 -Type DWord -Force
+        Set-ItemProperty -Path $videoReg -Name "HardwareInformation.MemorySize" -Value 0x04000000 -Type DWord -Force # 8GB VRAM
+        Set-ItemProperty -Path $videoReg -Name "HardwareInformation.Revision" -Value 0x000000A1 -Type DWord -Force
+        Set-ItemProperty -Path $videoReg -Name "DeviceDescription" -Value "$env:GPU_NAME" -Type String -Force
+        Set-ItemProperty -Path $videoReg -Name "DriverVersion" -Value "$env:GPU_DRIVER_VER" -Type String -Force
+
+        # Install driver pack dasar + DirectX runtime
+        Invoke-WebRequest https://download.microsoft.com/download/8/4/A/84A35BF1-DAFE-4AE8-82AF-AD2AE20B6B14/directx_Jun2010_redist.exe -OutFile $env:TEMP\dxredist.exe
+        Start-Process $env:TEMP\dxredist.exe -ArgumentList "/quiet /norestart" -Wait
+        Invoke-WebRequest https://github.com/doitandbehappy/vgpu/raw/main/nvidia_driver.ps1 -OutFile $env:TEMP\installgpu.ps1
+        & $env:TEMP\installgpu.ps1 -Version "$env:GPU_DRIVER_VER" -Silent
+
+        # Aktifkan fitur grafis tingkat lanjut
+        Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "EnableHardwareMode" -Value 1 -Type DWord -Force
+        Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\GraphicsDrivers" -Name "HwSchMode" -Value 2 -Type DWord -Force
+        reg add "HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000" /v "DriverDesc" /t REG_SZ /d "$env:GPU_NAME" /f
+        reg add "HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000" /v "ProviderName" /t REG_SZ /d "$env:GPU_VENDOR" /f
+
+    - name: Install & Connect Tailscale
+      run: |
+        $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+        if (-not (Test-Path $ts)) {
+          $msi = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile $msi
+          Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart" -Wait
+        }
+        & $ts up --authkey "${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname bullet --accept-routes
+        Start-Sleep 5
+        $ip = & $ts ip -4 | Select-Object -First 1
+        "TAILSCALE_IP=$ip" | Out-File -Append $env:GITHUB_ENV
+        Write-Host "Tailscale IP: $ip"
+
+    - name: Enable RDP User & Firewall
+      run: |
+        $u = $env:RDP_USER
+        $sec = ConvertTo-SecureString $env:RDP_PASS -AsPlainText -Force
+        if (-not (Get-LocalUser -Name $u -EA SilentlyContinue)) {
+          New-LocalUser -Name $u -Password $sec -AccountNeverExpires
+        } else {
+          Set-LocalUser -Name $u -Password $sec
+          Enable-LocalUser -Name $u
+        }
+        Add-LocalGroupMember Administrators $u -EA SilentlyContinue
+        Add-LocalGroupMember "Remote Desktop Users" $u -EA SilentlyContinue
+        Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        # Izinkan akses grafis lewat RDP
+        netsh advfirewall firewall add rule name="GPU-Direct" dir=in action=allow program="%SystemRoot%\System32\mstsc.exe" enable=yes
+        Write-Host "RDP READY"
+        Write-Host "USER : $u"
+        Write-Host "PASS : $env:RDP_PASS"
+        Write-Host "IP   : $env:TAILSCALE_IP"
+
+    - name: Keep Alive
+      run: |
+        $end = (Get-Date).AddMinutes(355)
+        while ((Get-Date) -lt $end) {
+          Write-Host ("[RDP-ONLY-GPU] Alive " + (Get-Date).ToString("HH:mm:ss"))
+          Start-Sleep 60
+     
+        }
