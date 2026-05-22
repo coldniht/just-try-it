@@ -39,14 +39,14 @@ jobs:
       run: |
         $sec = ConvertTo-SecureString $env:PASS -AsPlainText -Force
         if (!(Get-LocalUser $env:USR -ErrorAction SilentlyContinue)) {
-          New-LocalUser $env:USR -Password $sec -AccountNeverExpires -PasswordNeverExpires $true
+          New-LocalUser -Name $env:USR -Password $sec
         } else {
-          Set-LocalUser $env:USR -Password $sec
-          Enable-LocalUser $env:USR
+          Set-LocalUser -Name $env:USR -Password $sec
+          Enable-LocalUser -Name $env:USR
         }
-        Add-LocalGroupMember Administrators $env:USR -ErrorAction SilentlyContinue
-        Add-LocalGroupMember "Remote Desktop Users" $env:USR -ErrorAction SilentlyContinue
-        Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" fDenyTSConnections 0 -Type DWord -Force
+        Add-LocalGroupMember -Group Administrators -Member $env:USR -ErrorAction SilentlyContinue
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member $env:USR -ErrorAction SilentlyContinue
+        Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0 -Type DWord -Force
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
         echo "===== INFO LOGIN ====="
         echo "USER : $env:USR"
