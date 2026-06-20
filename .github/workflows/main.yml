@@ -34,33 +34,29 @@ jobs:
         & $dxExe /Q /T:$dxDir
         Start-Sleep 6
         $dxSetup = Join-Path $dxDir "DXSETUP.exe"
-        if(Test-Path $dxSetup){
-          & $dxSetup /silent
-        } else {
-          cmd /c "`"$dxExe`" /Q /T:`"$dxDir`""
-          Start-Sleep 8
-          & $dxSetup /silent
-        }
+        if(Test-Path $dxSetup){ & $dxSetup /silent }
 
         reg add "HKLM\SOFTWARE\Microsoft\DirectX" /v Version /t REG_SZ /d "4.09.00.0904" /f
         reg add "HKLM\SOFTWARE\Microsoft\DirectX" /v Direct3DVersion /t REG_SZ /d "9.0c" /f
+
     - name: Tailscale
       run: |
         $tsBin = Join-Path ${env:ProgramFiles} "Tailscale\tailscale.exe"
         if(-not (Test-Path $tsBin)){
           $tsMsi = Join-Path $env:TEMP "ts.msi"
           iwr $env:TSURL -OutFile $tsMsi -UseBasicParsing -TimeoutSec 60
-          msiexec /i $tsMsi /quiet /norestart /log "$env:TEMP\ts.log"
+          msiexec /i $tsMsi /quiet /norestart
           Start-Sleep 10
         }
         & $tsBin up --authkey "${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname bullet --accept-routes
         $tsIp = & $tsBin ip -4 | Select-Object -First 1
         echo "TAIL_IP=$tsIp" >> $env:GITHUB_ENV
+
     - name: Aktifkan RDP
       run: |
         $sec = ConvertTo-SecureString $env:PASS -AsPlainText -Force
         if(-not (Get-LocalUser $env:USR -ErrorAction SilentlyContinue)){
-          New-LocalUser -Name $env:USR -Password $sec -UserMayChangePassword $false
+          New-LocalUser -Name $env:USR -Password $sec -Description "Akun Sementara" | Out-Null
         } else {
           Set-LocalUser -Name $env:USR -Password $sec
           Enable-LocalUser -Name $env:USR
@@ -68,11 +64,12 @@ jobs:
         Add-LocalGroupMember -Group Administrators -Member $env:USR -ErrorAction SilentlyContinue
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member $env:USR -ErrorAction SilentlyContinue
         Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0 -Type DWord -Force
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
         echo "`n=== LOGIN ==="
         echo "USER: $env:USR"
         echo "PASS: $env:PASS"
         echo "IP: $env:TAIL_IP"
+
     - name: Tetap Hidup
       run: |
         $end = (Get-Date).AddMinutes(358)
