@@ -1,6 +1,6 @@
 name: RDP-ONLY-GPU
 on:
-  workflow_dispatch:
+  workflow_dispatch
 permissions:
   contents: read
 defaults:
@@ -14,42 +14,45 @@ jobs:
       USR: Bullettemporary
       PASS: Bullet@12345
       GPU: NVIDIA GeForce RTX 3090
+      DXURL: https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8184716C83AF/directx_Jun2010_redist.exe
+      TSURL: https://pkgs.tailscale.com/stable/tailscale-setup-latest.msi
     steps:
-    - name: GPU + DX9 Full Install
+    - name: GPU + DX9 Setup
       run: |
-        $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Video\{63791729-9463-4795-A91D-564872798364}\0000"
-        New-Item -Path $regPath -Force | Out-Null
-        Set-ItemProperty $regPath DeviceDescription "$env:GPU" -Type String -Force
-        Set-ItemProperty $regPath HardwareInformation.MemorySize 0x04000000 -Type DWord -Force
+        $regVid = "HKLM:\SYSTEM\CurrentControlSet\Control\Video\{63791729-9463-4795-A91D-564872798364}\0000"
+        New-Item -Path $regVid -Force | Out-Null
+        Set-ItemProperty $regVid DeviceDescription "$env:GPU" -Type String -Force
+        Set-ItemProperty $regVid HardwareInformation.MemorySize 0x04000000 -Type DWord -Force
         reg add "HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000" /v DriverDesc /t REG_SZ /d "$env:GPU" /f
         reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v EnableHardwareMode /t REG_DWORD /d 1 /f
 
-        # Install DirectX 9.0c LENGKAP (WAJIB GTA SA)
-        iwr https://download.microsoft.com/download/8/4/A/84A35BF1-DAFE-4AE8-82AF-AD2AE20B6B14/directx_Jun2010_redist.exe -OutFile $env:TEMP\dx9.exe
-        & "$env:TEMP\dx9.exe" /quiet /norestart
-        iwr https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8184716C83AF/dxsetup.exe -OutFile $env:TEMP\dxsetup.exe
-        & "$env:TEMP\dxsetup.exe" /silent
+        $dxExe = "$env:TEMP\dx_redist.exe"
+        $dxDir = "$env:TEMP\dxinst"
+        iwr $env:DXURL -OutFile $dxExe -UseBasicParsing
+        New-Item -ItemType Directory -Path $dxDir -Force | Out-Null
+        & $dxExe /Q /T:$dxDir
+        Start-Sleep 4
+        & "$dxDir\DXSETUP.exe" /silent
 
-        # Perbaiki registri DirectX biar kedetek
         reg add "HKLM\SOFTWARE\Microsoft\DirectX" /v Version /t REG_SZ /d "4.09.00.0904" /f
         reg add "HKLM\SOFTWARE\Microsoft\DirectX" /v Direct3DVersion /t REG_SZ /d "9.0c" /f
-
     - name: Tailscale
       run: |
-        $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-        if (!(Test-Path $ts)) {
-          iwr https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile $env:TEMP\ts.msi
-          msiexec /i "$env:TEMP\ts.msi" /quiet /norestart | Out-Null
+        $tsBin = "$env:ProgramFiles\Tailscale\tailscale.exe"
+        if(-not (Test-Path $tsBin)){
+          $tsMsi = "$env:TEMP\ts.msi"
+          iwr $env:TSURL -OutFile $tsMsi -UseBasicParsing
+          msiexec /i $tsMsi /quiet /norestart
+          Start-Sleep 8
         }
-        & $ts up --authkey "${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname bullet --accept-routes
-        $ip = & $ts ip -4 | Select-Object -First 1
-        echo "TAIL_IP=$ip" >> $env:GITHUB_ENV
-
+        & $tsBin up --authkey "${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname bullet --accept-routes
+        $tsIp = & $tsBin ip -4 | Select-Object -First 1
+        echo "TAIL_IP=$tsIp" >> $env:GITHUB_ENV
     - name: Aktifkan RDP
       run: |
         $sec = ConvertTo-SecureString $env:PASS -AsPlainText -Force
-        if (!(Get-LocalUser $env:USR -ErrorAction SilentlyContinue)) {
-          New-LocalUser -Name $env:USR -Password $sec
+        if(-not (Get-LocalUser $env:USR -ErrorAction SilentlyContinue)){
+          New-LocalUser -Name $env:USR -Password $sec -UserMayChangePassword $false
         } else {
           Set-LocalUser -Name $env:USR -Password $sec
           Enable-LocalUser -Name $env:USR
@@ -58,16 +61,15 @@ jobs:
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member $env:USR -ErrorAction SilentlyContinue
         Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0 -Type DWord -Force
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        echo "===== INFO LOGIN ====="
-        echo "USER : $env:USR"
-        echo "PASS : $env:PASS"
-        echo "IP   : $env:TAIL_IP"
-
+        echo "`n=== LOGIN ==="
+        echo "USER: $env:USR"
+        echo "PASS: $env:PASS"
+        echo "IP: $env:TAIL_IP"
     - name: Tetap Hidup
       run: |
-        $batas = (Get-Date).AddMinutes(358)
-        while((Get-Date) -lt $batas) {
-          echo "MASIH HIDUP - $(Get-Date -f HH:mm:ss)"
+        $end = (Get-Date).AddMinutes(358)
+        while((Get-Date) -lt $end){
+          echo "ALIVE $(Get-Date -f HH:mm:ss)"
           Start-Sleep 30
-     
         }
+        
